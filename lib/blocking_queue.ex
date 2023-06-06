@@ -70,19 +70,53 @@ defmodule BlockingQueue do
 
   @spec handle_call(call_t, from_t, state_t) :: result_t
 
+
+  def handle_call(:crash, _, state) do 
+       a= 1/0
+      {:stop, :test, state }
+  end 
+
+  def handle_call(:get_left_size, _from, state ) do 
+    reply= 
+      case state do 
+          {max, {left, right}} ->  max - length(left) - length(right)
+          {max, {left, right}, _, _} -> max - length(left) - length(right)
+          _ -> nil 
+      end 
+    {:reply, reply, state}
+  end 
+
+  def handle_call(:get_state, _from, state) do 
+    {:reply, state, state}
+  end 
+
+  def handle_call({:set_size, size}, from, state) do 
+    {old_size, state}= 
+      case state do 
+        {max, queue} ->  {max, {size, queue} }
+        {max, queue, op, l} -> {max, { size, queue, op, l}}
+        _ -> {nil, state}
+      end  
+    {:reply, %{old: old_size, new: size} , state}
+  end 
+
+
+
   # start a list of waiting pushers when the first client tries to push to a full queue
   def handle_call({:push, item}, from, {max, queue={left,right}}) when length(left) + length(right) >= max do
-    {:reply, :block, {max, queue, :push, [{from, item}]}}
+      {:reply, nil, {max, queue}}
   end
 
   # prepend new waiter to list of waiting pushers when they try to push to a full queue
   def handle_call({:push, item}, from, {max, queue={left,right}, :push, [next|rest]}) when length(left) + length(right) >= max do
-    {:reply, :block, {max, queue, :push, [{from, item} | [next|rest]] }}
+    {:reply, nil, {max, queue, :push, [next|rest] }}
   end
+
 
   def handle_call({:push, item}, _, {max, queue}) do
     {:reply, nil, { max, :queue.in(item, queue) }}
   end
+
 
   # send item to a single waiting popper 
   def handle_call({:push, item}, _, {max, @empty_queue, :pop, [next|[]]}) do
@@ -128,6 +162,15 @@ defmodule BlockingQueue do
     {{:value, popped_item}, new_queue} = :queue.out(queue)
     {:reply, popped_item, {max, new_queue}}
   end
+
+  def handle_call(request, _from, state) do 
+    {:reply, :ok, state}
+  end 
+
+
+  def terminate(_reason, _state) do
+  end
+
 
   @doc """
   Pushes a new item into the queue.  Blocks if the queue is full.
@@ -188,4 +231,21 @@ defmodule BlockingQueue do
   def pop_stream(pid) do
     Stream.repeatedly(fn -> BlockingQueue.pop(pid) end)
   end
+
+  def get_left_size(pid, timeout \\ 5000) do
+      GenServer.call(pid, :get_left_size, timeout)
+  end
+
+  def set_size(pid, size, timeout \\ 5000) do 
+    GenServer.call(pid, {:set_size, size}, timeout)
+  end 
+
+  def get_state(pid, timeout \\ 5000) do
+    GenServer.call(pid, :get_state, timeout)
+  end
+
+  def crash(pid, timeout \\ 5000) do 
+      GenServer.call(pid, :crash, timeout)
+  end 
+
 end
